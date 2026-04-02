@@ -1,6 +1,8 @@
 package types
 
-import "time"
+import (
+	"time"
+)
 
 //此消息是为了承接来自不同channel的消息
 //不同channel的消息是不一样的
@@ -42,14 +44,9 @@ type Session struct {
 
 	//本次session建立的时候绑定来源
 	Channel string `json:"channel"`
-
 	//config 是本次会话绑定的配置 这个配置里面包含了对应的agent的使用等等
-	//Config string `json:"config"`
-	//
-	////最后一条信息的id
-	//LastMessageID string `json:"lastMessageID"`
-	//
-	//MessageCount int `json:"messageCount"`
+	//内存版实现 消息持久化
+	Messages []LLMMessage // ← 直接存在内存里
 
 	LastActivityTime time.Time `json:"lastActivityTime"`
 	//产生session 的时间

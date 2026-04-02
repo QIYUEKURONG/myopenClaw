@@ -58,7 +58,7 @@ func (r *Runtime) buildSystemPrompt() string {
 
 }
 
-func (r *Runtime) ProcessMessage(ctx context.Context, msg *types.Message) (*types.Response, error) {
+func (r *Runtime) ProcessMessage(ctx context.Context, msg *types.Message, session *types.Session) (*types.Response, error) {
 	// 你来实现：
 	// 1. 构建 System Prompt
 	// 2. 调用 LLM（暂时先返回假数据，因为还没有 LLM Client）

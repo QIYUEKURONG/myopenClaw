@@ -83,7 +83,7 @@ func (g *Gateway) HandleMessage(ctx context.Context, msg *types.Message) (*types
 	msg.SessionID = session.ID
 	fmt.Printf("%v : %v\n", msg, session)
 
-	response, err := g.RunTime.ProcessMessage(ctx, msg)
+	response, err := g.RunTime.ProcessMessage(ctx, msg, session)
 	if err != nil {
 		fmt.Errorf("RunTime ProcessMessage error: +%v", err.Error())
 		return nil, err
