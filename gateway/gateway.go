@@ -62,6 +62,7 @@ func (g *Gateway) getOrCreateSession(msg *types.Message) (*types.Session, error)
 	newSession.LastActivityTime = time.Now()
 	newSession.UserID = msg.UserID
 	newSession.Channel = msg.Channel
+	newSession.Messages = make([]types.LLMMessage, 0)
 
 	g.Session[sessionKey] = &newSession
 

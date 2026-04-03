@@ -63,25 +63,40 @@ func (r *Runtime) ProcessMessage(ctx context.Context, msg *types.Message, sessio
 	// 1. 构建 System Prompt
 	// 2. 调用 LLM（暂时先返回假数据，因为还没有 LLM Client）
 	// 3. 返回 Response
-	prompt := r.buildSystemPrompt()
-	if prompt == "" {
-		return nil, errors.New("no prompt")
+
+	//只是在第一轮的时候加入
+	if len(session.Messages) == 0 {
+		prompt := r.buildSystemPrompt()
+		if prompt == "" {
+			return nil, errors.New("no prompt")
+		}
+		session.Messages = append(session.Messages, types.LLMMessage{
+			Role: constant.SysRole, Content: prompt,
+		})
 	}
 
-	llmMessages := []types.LLMMessage{
-		{Role: constant.SysRole, Content: prompt},
-		{Role: constant.UserRole, Content: msg.Content},
-	}
+	addHistoryMessage := session.Messages
+	//加入用户信息
+	addHistoryMessage = append(addHistoryMessage, types.LLMMessage{
+		Role: constant.UserRole, Content: msg.Content,
+	})
 
 	tryCount := 5
 	for i := 0; i < tryCount; i++ {
 		//通过模型找到对应的tool 的结构体 现在只有一个deepseek 就写一个吧
-		chatResult, err := r.LLMClient.Chat(ctx, llmMessages, r.Tools)
+		chatResult, err := r.LLMClient.Chat(ctx, addHistoryMessage, r.Tools)
 		if err != nil {
 			return nil, fmt.Errorf("LLMClient deal chat find error  %v", err)
 		}
 
+		addHistoryMessage = append(addHistoryMessage, types.LLMMessage{
+			Role:      "assistant",
+			Content:   chatResult.Content,
+			ToolCalls: chatResult.ToolCalls,
+		})
+
 		if len(chatResult.ToolCalls) == 0 {
+			session.Messages = addHistoryMessage
 			//得到了最后的结果
 			return &types.Response{
 				SessionID:   msg.SessionID,
@@ -89,11 +104,6 @@ func (r *Runtime) ProcessMessage(ctx context.Context, msg *types.Message, sessio
 				CreatedTime: time.Now(),
 			}, nil
 		}
-		llmMessages = append(llmMessages, types.LLMMessage{
-			Role:      "assistant",
-			Content:   chatResult.Content,
-			ToolCalls: chatResult.ToolCalls,
-		})
 
 		//执行工具
 		for _, tc := range chatResult.ToolCalls {
@@ -103,7 +113,7 @@ func (r *Runtime) ProcessMessage(ctx context.Context, msg *types.Message, sessio
 				toolResult = fmt.Sprintf("Error: %v", err)
 			}
 
-			llmMessages = append(llmMessages, types.LLMMessage{
+			addHistoryMessage = append(addHistoryMessage, types.LLMMessage{
 				Role:       "tool",
 				Content:    toolResult,
 				ToolCallID: tc.ID,

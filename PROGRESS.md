@@ -924,4 +924,387 @@ LLM 收到工具结果，生成最终回复:
 
 ---
 
-*最后更新：2026-04-02 16:30*
+---
+
+## 🚀 Stage 4: Session Management (会话历史管理)
+
+### 2026-04-03 的进度
+
+#### Session Management 实现（内存版）
+
+**目标**：实现多轮对话记忆，让 Agent 能够记住上下文
+
+**实现步骤**：
+
+1. ✅ 扩展 `types.Session` 结构：
+   ```go
+   type Session struct {
+       ID               string
+       UserID           string
+       Channel          string
+       Messages         []LLMMessage  // ← 新增：存储对话历史
+       LastActivityTime time.Time
+       CreatedTime      time.Time
+   }
+   ```
+
+2. ✅ 修改 `gateway.go` 初始化 Session：
+   ```go
+   newSession.Messages = make([]types.LLMMessage, 0)
+   ```
+
+3. ✅ 修改 `agent/agent.go` 实现历史管理：
+   - **历史加载**：
+     - 新会话 → 添加 System Prompt
+     - 旧会话 → 复制历史消息
+   - **历史保存**：
+     - 每轮对话后保存到 `session.Messages`
+   - **多轮调用**：
+     - 支持最多 5 轮 LLM 调用（Function Calling）
+
+**核心代码片段**：
+```go
+// 1. 历史加载
+if len(session.Messages) == 0 {
+    // 新会话：添加 System Prompt
+    session.Messages = append(session.Messages, types.LLMMessage{
+        Role:    constant.SysRole,
+        Content: r.buildSystemPrompt(),
+    })
+}
+
+// 2. 复制历史并添加用户消息
+llmMessages := append(session.Messages, types.LLMMessage{
+    Role:    constant.UserRole,
+    Content: msg.Content,
+})
+
+// 3. 循环调用 LLM
+for i := 0; i < tryCount; i++ {
+    chatResult, err := r.LLMClient.Chat(ctx, llmMessages, r.Tools)
+    
+    // 添加 assistant 消息
+    llmMessages = append(llmMessages, types.LLMMessage{
+        Role:      "assistant",
+        Content:   chatResult.Content,
+        ToolCalls: chatResult.ToolCalls,
+    })
+    
+    // 如果没有 tool_calls，保存并返回
+    if len(chatResult.ToolCalls) == 0 {
+        session.Messages = llmMessages  // ← 保存完整历史
+        return &types.Response{...}, nil
+    }
+    
+    // 执行工具并添加 tool 消息
+    for _, tc := range chatResult.ToolCalls {
+        toolResult, _ := r.executeTool(&tc)
+        llmMessages = append(llmMessages, types.LLMMessage{
+            Role:       "tool",
+            Content:    toolResult,
+            ToolCallID: tc.ID,
+        })
+    }
+}
+```
+
+**测试结果**：
+```
+=== 第一轮对话 ===
+用户: "我叫小明"
+Agent: "你好小明！我是MyOpenClaw，很高兴认识你！有什么我可以帮助你的吗？"
+
+保存的历史:
+- system: (System Prompt)
+- user: "我叫小明"
+- assistant: "你好小明..."
+
+=== 第二轮对话 ===
+用户: "我叫什么名字？"
+
+加载的历史:
+- system: (System Prompt)
+- user: "我叫小明"
+- assistant: "你好小明..."
+- user: "我叫什么名字？"  ← 新消息
+
+Agent: "你刚才告诉我你叫小明。所以你的名字是小明！"
+→ 调用 echo 工具验证
+→ 最终回复: "是的，你叫小明！我记住了。"
+
+✅ 成功记住上下文！
+```
+
+**验证的功能**：
+- ✅ 新会话自动添加 System Prompt
+- ✅ 旧会话加载历史消息
+- ✅ 每轮对话后保存完整历史
+- ✅ 多轮对话记忆功能正常
+- ✅ Function Calling 与 Session 集成正常
+
+---
+
+### 当前架构（更新后）
+
+```
+┌─────────────────────────────────────────┐
+│            main.go (CLI)                │
+│         用户输入 → 消息构建              │
+└──────────────────┬──────────────────────┘
+                   │
+                   ↓
+┌─────────────────────────────────────────┐
+│         Gateway (消息路由)               │
+│  - Session 管理                          │
+│  - Session.Messages 初始化               │  ← 新增
+│  - 消息分发                              │
+└──────────────────┬──────────────────────┘
+                   │
+                   ↓
+┌─────────────────────────────────────────┐
+│      Agent Runtime (执行引擎)            │
+│  - buildSystemPrompt()                  │
+│  - ProcessMessage() [工具调用循环]       │
+│  - 历史加载（session.Messages）          │  ← 新增
+│  - 历史保存（session.Messages）          │  ← 新增
+│  - executeTool()                        │
+└──────────────────┬──────────────────────┘
+                   │
+                   ↓
+┌─────────────────────────────────────────┐
+│      LLMClient (抽象层)                  │
+│  使用 types.LLMMessage                   │
+└──────────────────┬──────────────────────┘
+                   │
+                   ↓
+┌─────────────────────────────────────────┐
+│    DeepSeekClient (适配器层)             │
+│  - convertToDeepSeekMessages()          │
+│  - convertToCommonLLMTool()             │
+└──────────────────┬──────────────────────┘
+                   │
+                   ↓
+┌─────────────────────────────────────────┐
+│         DeepSeek API                    │
+│  Function Calling + Multi-turn Chat     │
+└─────────────────────────────────────────┘
+```
+
+---
+
+### 与 OpenClaw 的对比
+
+**当前实现（内存版）**：
+- ✅ Session 存储在内存 Map 中
+- ✅ Messages 存储在 `Session.Messages` 字段
+- ⚠️  重启后数据丢失
+
+**OpenClaw 的实现（文件版）**：
+- ✅ Session 元数据存储在文件系统
+- ✅ Messages 存储在独立的文件（Lazy Loading）
+- ✅ 重启后数据保留
+- ✅ 支持大量历史消息（不占用内存）
+
+**下一步优化方向**（参考 OpenClaw）：
+1. 🔄 **文件持久化**：
+   - Session 元数据 → `~/.myopenclaw/sessions/{sessionId}/meta.json`
+   - 历史消息 → `~/.myopenclaw/sessions/{sessionId}/messages.jsonl`
+   
+2. 🔄 **Lazy Loading**：
+   - 启动时不加载历史
+   - 只在需要时加载（`Agent.ProcessMessage` 时）
+   
+3. 🔄 **Context Window 管理**：
+   - 限制消息数量（如最多 100 条）
+   - 自动裁剪旧消息
+   
+4. 🔄 **命令系统**：
+   - `/new` - 创建新会话
+   - `/reset` - 清空当前会话历史
+   - `/history` - 显示历史消息
+
+---
+
+### 学到的核心概念
+
+#### 1. Session 历史管理的职责分配
+**问题**：历史加载应该在 Gateway 还是 Runtime？
+
+**结论**：在 Runtime 中
+- **Gateway**：管理 Session 生命周期（创建、查找、初始化）
+- **Runtime**：管理业务逻辑（历史加载、LLM 调用、历史保存）
+- **原因**：历史加载与 LLM 调用紧密相关，属于业务逻辑
+
+**参考 OpenClaw**：
+- Gateway 不处理消息历史
+- Agent Runtime 负责加载 `messages.jsonl`
+
+---
+
+#### 2. Workspace vs Session
+**Workspace**（工作目录）：
+- Agent 的配置文件（`AGENTS.md`, `SOUL.md`, `TOOLS.md`, `MEMORY.md`）
+- 工具执行的目录
+- 可被子 Agent 继承
+
+**Session**（会话）：
+- 对话历史（Messages）
+- 会话元数据（UserID, Channel, CreatedTime）
+- 不被继承
+
+**关键区别**：
+- Workspace 是静态配置
+- Session 是动态会话状态
+
+---
+
+#### 3. 内存版 vs 文件版的权衡
+
+**内存版优势**：
+- ✅ 实现简单
+- ✅ 读写速度快
+- ✅ 适合学习和原型开发
+
+**内存版劣势**：
+- ❌ 重启后数据丢失
+- ❌ 内存占用随消息增长
+- ❌ 无法支持大量历史消息
+
+**文件版优势**：
+- ✅ 数据持久化
+- ✅ Lazy Loading 节省内存
+- ✅ 支持大量历史消息
+
+**文件版劣势**：
+- ❌ 实现复杂（文件 I/O、并发控制）
+- ❌ 读写速度较慢
+
+**学习路径**：
+- 先实现内存版（理解核心概念）✅
+- 再实现文件版（学习持久化） ← 下一步
+
+---
+
+### 遇到的问题和解决方案
+
+#### 问题 1：System Prompt 重复添加
+**问题**：
+```go
+if len(session.Messages) == 0 {
+    session.Messages = append(session.Messages, systemPrompt)  // 直接修改
+}
+llmMessages := session.Messages  // 引用同一个切片
+```
+- 第一次调用：`session.Messages` 包含 system prompt
+- 第二次调用：`session.Messages` 已有 system prompt，不应再添加
+- 但如果逻辑错误，可能重复添加
+
+**解决**：
+- 检查 `len(session.Messages) == 0` 确保只添加一次
+- 使用 `append([]T, slice...)` 复制切片，避免意外修改
+
+---
+
+#### 问题 2：变量命名混淆
+**问题**：同时使用 `llmMessages` 和 `addHistoryMessage` 两个变量
+
+**解决**：统一使用一个变量 `llmMessages`
+- 加载历史 → `llmMessages`
+- 添加新消息 → `llmMessages`
+- 循环调用 → `llmMessages`
+- 保存历史 → `session.Messages = llmMessages`
+
+---
+
+#### 问题 3：最终消息未保存
+**问题**：LLM 返回最终回复时，没有将 assistant 消息保存到 `session.Messages`
+
+**解决**：
+```go
+if len(chatResult.ToolCalls) == 0 {
+    session.Messages = llmMessages  // ← 保存完整历史（包含最终回复）
+    return &types.Response{...}, nil
+}
+```
+
+---
+
+### 当前状态
+
+```
+✅ types/message.go      - 核心数据结构（包含 Session.Messages）
+✅ types/llm_message.go  - 通用 LLM 消息类型
+✅ constant/constant.go  - 角色常量
+✅ tools/tool.go         - 工具接口
+✅ tools/echo.go         - Echo 工具
+✅ llm/client.go         - LLM 接口（抽象层）
+✅ llm/deepseekClient.go - DeepSeek 适配器
+✅ agent/agent.go        - Agent Runtime（支持历史管理）
+✅ gateway/gateway.go    - Gateway（支持 Session 初始化）
+✅ main.go               - CLI 入口
+✅ PROGRESS.md           - 学习进度文档
+
+✅ 完成：Session Management (内存版)
+```
+
+---
+
+### 下一步计划
+
+#### Stage 5: Session Management (文件版)
+
+**目标**：实现文件持久化 + Lazy Loading（参考 OpenClaw）
+
+**步骤**：
+1. 设计文件结构：
+   ```
+   ~/.myopenclaw/
+   └── sessions/
+       └── {sessionId}/
+           ├── meta.json          # Session 元数据
+           └── messages.jsonl     # 历史消息（每行一条）
+   ```
+
+2. 实现持久化：
+   - `SaveSession()`：保存 Session 元数据
+   - `LoadSession()`：加载 Session 元数据
+   - `AppendMessage()`：追加消息到文件
+   - `LoadMessages()`：加载历史消息
+
+3. 实现 Lazy Loading：
+   - Gateway 启动时不加载历史
+   - Agent Runtime 在 `ProcessMessage` 时按需加载
+
+4. 实现命令系统：
+   - `/new` - 创建新会话
+   - `/reset` - 清空当前会话历史
+   - `/history` - 显示历史消息
+
+**预期效果**：
+```
+# 第一次运行
+用户: 我叫小明
+Agent: 你好小明！
+
+# 退出程序并重新启动
+
+# 第二次运行
+用户: 我叫什么名字？
+Agent: 你叫小明！  ← 从文件加载历史
+```
+
+---
+
+## 🎉 里程碑（更新）
+
+- ✅ **2026-03-24**：项目启动，完成基础架构（Mock 版本）
+- ✅ **2026-03-26 上午**：集成 DeepSeek LLM，实现真实对话
+- ✅ **2026-03-26 下午**：扩展 Tool 接口，添加 Parameters() 方法
+- ✅ **2026-03-27**：架构重构，引入抽象层（依赖倒置原则）
+- ✅ **2026-04-02**：Function Calling 完整实现与测试
+- ✅ **2026-04-03**：Session Management (内存版) 实现 ← 新增
+- 🚧 **下一步**：Session Management (文件版) + Lazy Loading
+
+---
+
+*最后更新：2026-04-03 15:00*
