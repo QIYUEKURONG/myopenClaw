@@ -2,10 +2,11 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"log"
 	"myopenclaw/constant"
 	"myopenclaw/llm"
+	"myopenclaw/storage"
 	"myopenclaw/tools"
 	"myopenclaw/types"
 	"strings"
@@ -66,18 +67,26 @@ func (r *Runtime) ProcessMessage(ctx context.Context, msg *types.Message, sessio
 
 	//只是在第一轮的时候加入
 	if len(session.Messages) == 0 {
-		prompt := r.buildSystemPrompt()
-		if prompt == "" {
-			return nil, errors.New("no prompt")
+		//从历史里面加载
+		messgaes, err := storage.LoadMessages(msg.SessionID)
+		if err != nil {
+			log.Printf("%v : %v\n", msg.SessionID, err)
+			return nil, err
 		}
-		session.Messages = append(session.Messages, types.LLMMessage{
-			Role: constant.SysRole, Content: prompt,
-		})
+		if len(messgaes) != 0 {
+			session.Messages = messgaes
+		}
 	}
 
 	addHistoryMessage := session.Messages
 	//加入用户信息
 	addHistoryMessage = append(addHistoryMessage, types.LLMMessage{
+		Role: constant.UserRole, Content: msg.Content,
+	})
+
+	//追加新消息
+	newMessgae := make([]types.LLMMessage, 0)
+	newMessgae = append(newMessgae, types.LLMMessage{
 		Role: constant.UserRole, Content: msg.Content,
 	})
 
@@ -94,9 +103,19 @@ func (r *Runtime) ProcessMessage(ctx context.Context, msg *types.Message, sessio
 			Content:   chatResult.Content,
 			ToolCalls: chatResult.ToolCalls,
 		})
+		newMessgae = append(newMessgae, types.LLMMessage{
+			Role:      "assistant",
+			Content:   chatResult.Content,
+			ToolCalls: chatResult.ToolCalls,
+		})
 
 		if len(chatResult.ToolCalls) == 0 {
 			session.Messages = addHistoryMessage
+			//记载到文件里面
+			err = storage.AppendMessage(msg.SessionID, newMessgae)
+			if err != nil {
+				return nil, err
+			}
 			//得到了最后的结果
 			return &types.Response{
 				SessionID:   msg.SessionID,
@@ -117,6 +136,12 @@ func (r *Runtime) ProcessMessage(ctx context.Context, msg *types.Message, sessio
 				Role:       "tool",
 				Content:    toolResult,
 				ToolCallID: tc.ID,
+			})
+
+			newMessgae = append(newMessgae, types.LLMMessage{
+				Role:      "assistant",
+				Content:   chatResult.Content,
+				ToolCalls: chatResult.ToolCalls,
 			})
 		}
 

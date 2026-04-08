@@ -8,6 +8,7 @@ import (
 )
 
 // 从 sessions.json 加载索引
+// result ：session key ===》 session id
 func LoadSessionIndex() (map[string]string, error) {
 	path, err := GetSessionDir()
 	if err != nil {

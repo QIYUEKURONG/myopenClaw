@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"myopenclaw/agent"
+	"myopenclaw/storage"
 	"myopenclaw/types"
 	"sync"
 	"time"
@@ -35,8 +37,22 @@ type Birge struct {
 }
 
 func NewGateway() *Gateway {
+	//load session
+	sessionMap, err := storage.LoadSessionIndex()
+	if err != nil {
+		fmt.Errorf("Error loading session index: %v", err)
+		panic(err)
+	}
+
+	result := make(map[string]*types.Session)
+	for sessionKey, sessionId := range sessionMap {
+		result[sessionKey] = &types.Session{
+			ID: sessionId,
+		}
+	}
+
 	return &Gateway{
-		Session: make(map[string]*types.Session),
+		Session: result,
 	}
 }
 
@@ -53,6 +69,12 @@ func (g *Gateway) getOrCreateSession(msg *types.Message) (*types.Session, error)
 
 	if val, ok := g.Session[sessionKey]; ok {
 		return val, nil
+	}
+
+	err := storage.SaveSessionIndex(map[string]string{sessionKey: uuid.New().String()})
+	if err != nil {
+		log.Fatalf("Error saving session: %v", err)
+		return nil, fmt.Errorf("Error saving session: %v", err)
 	}
 
 	var newSession types.Session
