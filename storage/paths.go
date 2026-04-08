@@ -9,9 +9,9 @@ import (
 func GetSessionDir() (string, error) {
 	dir, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Errorf("Failed to get user home dir: %v", err)
-		return "", err
+		return "", fmt.Errorf("Failed to get user home dir: %v", err)
 	}
+	current := filepath.Join(dir, ".myopenclaw", "sessions")
 
-	//session
+	return current, nil
 }
