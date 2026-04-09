@@ -75,10 +75,20 @@ func (r *Runtime) ProcessMessage(ctx context.Context, msg *types.Message, sessio
 		}
 		if len(messgaes) != 0 {
 			session.Messages = messgaes
+		} else {
+			//等于空的情况下加载一下系统的提示词
+			prompt := r.buildSystemPrompt()
+			session.Messages = []types.LLMMessage{
+				{
+					Role:    constant.SysRole,
+					Content: prompt,
+				},
+			}
 		}
 	}
 
-	addHistoryMessage := session.Messages
+	addHistoryMessage := make([]types.LLMMessage, len(session.Messages))
+	copy(addHistoryMessage, session.Messages)
 	//加入用户信息
 	addHistoryMessage = append(addHistoryMessage, types.LLMMessage{
 		Role: constant.UserRole, Content: msg.Content,
@@ -139,9 +149,9 @@ func (r *Runtime) ProcessMessage(ctx context.Context, msg *types.Message, sessio
 			})
 
 			newMessgae = append(newMessgae, types.LLMMessage{
-				Role:      "assistant",
-				Content:   chatResult.Content,
-				ToolCalls: chatResult.ToolCalls,
+				Role:       "tool",
+				Content:    toolResult,
+				ToolCallID: tc.ID,
 			})
 		}
 

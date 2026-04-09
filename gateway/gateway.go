@@ -71,12 +71,6 @@ func (g *Gateway) getOrCreateSession(msg *types.Message) (*types.Session, error)
 		return val, nil
 	}
 
-	err := storage.SaveSessionIndex(map[string]string{sessionKey: uuid.New().String()})
-	if err != nil {
-		log.Fatalf("Error saving session: %v", err)
-		return nil, fmt.Errorf("Error saving session: %v", err)
-	}
-
 	var newSession types.Session
 	//这个id对应的本次的唯一的id
 	newSession.ID = uuid.New().String()
@@ -87,6 +81,15 @@ func (g *Gateway) getOrCreateSession(msg *types.Message) (*types.Session, error)
 	newSession.Messages = make([]types.LLMMessage, 0)
 
 	g.Session[sessionKey] = &newSession
+
+	index, _ := storage.LoadSessionIndex()
+	index[sessionKey] = newSession.ID
+
+	err := storage.SaveSessionIndex(index)
+	if err != nil {
+		log.Fatalf("Error saving session: %v", err)
+		return nil, fmt.Errorf("Error saving session: %v", err)
+	}
 
 	return &newSession, nil
 }
