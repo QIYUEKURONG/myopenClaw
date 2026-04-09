@@ -34,6 +34,10 @@ func LoadSessionIndex() (map[string]string, error) {
 	return result, nil
 }
 
+//func ResetSessionInfo(sessionKey string) error {
+//
+//}
+
 // 把索引保存到 sessions.json
 func SaveSessionIndex(data map[string]string) error {
 	path, err := GetSessionDir()

@@ -8,6 +8,7 @@ import (
 	"myopenclaw/agent"
 	"myopenclaw/storage"
 	"myopenclaw/types"
+	"strings"
 	"sync"
 	"time"
 
@@ -94,13 +95,38 @@ func (g *Gateway) getOrCreateSession(msg *types.Message) (*types.Session, error)
 	return &newSession, nil
 }
 
+func (g *Gateway) handleCommand(ctx context.Context, msg *types.Message) (*types.Response, error) {
+	switch msg.Content {
+	case "/new":
+		//从内存删了
+		sessionKey := msg.UserID + "_" + msg.Channel
+		if _, ok := g.Session[sessionKey]; ok {
+			delete(g.Session, sessionKey)
+		}
+		return &types.Response{ID: uuid.NewString(), Content: "已创建新会话", SessionID: msg.SessionID, CreatedTime: time.Now()}, nil
+	case "/reset":
+		sessionKey := msg.UserID + "_" + msg.Channel
+		if _, ok := g.Session[sessionKey]; !ok {
+			return &types.Response{ID: uuid.NewString(), Content: "未找到对应的用户", SessionID: msg.SessionID, CreatedTime: time.Now()},
+				fmt.Errorf("未找到对应的用户信息")
+		}
+		//storage.SaveSessionIndex()
+
+	case "history":
+
+	default:
+		return &types.Response{Content: "未知命令: " + msg.Content}, nil
+	}
+
+}
+
 // HandleMessage 处理消息（核心方法）
 func (g *Gateway) HandleMessage(ctx context.Context, msg *types.Message) (*types.Response, error) {
-	// 你来实现：
-	// 1. 获取或创建 Session
-	// 2. 将 Session.ID 赋值给 msg.SessionID
-	// 3. 打印日志（方便调试）
-	// 4. 暂时返回一个假的 Response（因为还没有 Agent Runtime）
+	//对ai模式进行
+	if strings.HasPrefix(msg.Channel, "/") {
+		return g.handleCommand(ctx, msg)
+	}
+
 	session, err := g.getOrCreateSession(msg)
 	if err != nil {
 		fmt.Errorf("getOrCreateSession find error: +%v", err.Error())

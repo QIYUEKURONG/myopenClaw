@@ -29,7 +29,7 @@ type Response struct {
 	ID string `json:"id"`
 	//回复的消息
 	Content string `json:"content"`
-	//这里的to其实是告诉应该发送给那个
+
 	SessionID string `json:"sessionID"`
 	//生产的时间
 	CreatedTime time.Time `json:"createdTime"`

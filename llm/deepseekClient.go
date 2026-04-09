@@ -10,6 +10,7 @@ import (
 	"myopenclaw/types"
 	"net/http"
 	"os"
+	"time"
 )
 
 type DeepSeekClient struct {
@@ -157,11 +158,10 @@ func (d *DeepSeekClient) Chat(ctx context.Context, messages []types.LLMMessage, 
 	req.Header.Set("Authorization", "Bearer "+d.APIKey)
 
 	// 调试信息
-	fmt.Printf("[DEBUG] API Key: %s\n", d.APIKey)
 	fmt.Printf("[DEBUG] Request URL: %s\n", d.BaseURL+"/chat/completions")
 	fmt.Printf("[DEBUG] Request Body: %s\n", string(requestBody))
 
-	httpClient := &http.Client{}
+	httpClient := &http.Client{Timeout: 10 * time.Second}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
